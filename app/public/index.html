@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PAL — IELTS Speaking Practice</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">PAL<span>· IELTS Speaking Examiner</span></div>
+  <div id="modeBadge" class="badge"></div>
+</header>
+
+<main>
+  <!-- SETUP -->
+  <section id="setup" class="card hero">
+    <h1>Practise IELTS Speaking with an AI examiner</h1>
+    <p class="lead">
+      Sit a realistic, face-to-face mock Speaking test with a video examiner, then get an
+      instant <strong>band-score report</strong> (0–9 on all four official criteria) —
+      scored by Tavus itself from your transcript and on-camera delivery.
+    </p>
+
+    <div class="field">
+      <label>Your name (optional)</label>
+      <input id="candidateName" type="text" placeholder="e.g. Alex" />
+    </div>
+
+    <div class="field">
+      <label>Which parts do you want to practise?</label>
+      <div class="parts">
+        <label class="chk"><input type="checkbox" class="part" value="1" checked /> Part 1 · Interview</label>
+        <label class="chk"><input type="checkbox" class="part" value="2" checked /> Part 2 · Cue card (long turn)</label>
+        <label class="chk"><input type="checkbox" class="part" value="3" checked /> Part 3 · Discussion</label>
+      </div>
+      <p class="hint">Multiple parts run as one continuous test. Default is the full 3-part test.</p>
+    </div>
+
+    <button id="startBtn" class="primary">Start mock test</button>
+    <p id="startError" class="error"></p>
+  </section>
+
+  <!-- CALL -->
+  <section id="call" class="card hidden">
+    <div class="callgrid">
+      <div class="videowrap">
+        <iframe id="callFrame" allow="camera; microphone; fullscreen; display-capture; autoplay" title="IELTS examiner"></iframe>
+      </div>
+      <aside class="sidepanel">
+        <h3>Part 2 prep timer</h3>
+        <p class="hint">When the examiner hands you the cue card, start your 1-minute prep.
+          The examiner stays silent — pause as long as you need.</p>
+        <div id="timer" class="timer">1:00</div>
+        <div class="timerbtns">
+          <button id="prepBtn" class="ghost">Start 1-minute prep</button>
+          <button id="resetTimerBtn" class="ghost">Reset</button>
+        </div>
+        <hr/>
+        <button id="finishBtn" class="primary">Finish test &amp; get score</button>
+        <button id="sampleBtn" class="ghost small">Demo: load a sample report</button>
+      </aside>
+    </div>
+  </section>
+
+  <!-- REPORT -->
+  <section id="report" class="card hidden">
+    <div id="scoring" class="scoring">
+      <div class="spinner"></div>
+      <p>Scoring your test… Tavus is reading the full transcript and your on-camera
+         delivery to grade all four IELTS criteria.</p>
+      <p class="hint">This is a detailed examiner report — it usually takes up to a minute.</p>
+    </div>
+    <div id="reportCard" class="hidden"></div>
+    <button id="againBtn" class="ghost">Practise again</button>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>
