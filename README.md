@@ -47,6 +47,7 @@ uv venv && uv pip install -e ".[dev]"   # core is pure stdlib; this just adds py
 uv run pytest -q                         # unit tests
 uv run python examples/demo.py           # CLI demo: features + scorecard for a turn
 uv run python examples/demo_gop.py       # GOP pronunciation scoring on synthetic posteriors
+uv run python examples/demo_part1_flow.py # near-deterministic Part 1 examiner flow (directive sequence)
 uv run python examples/server.py         # assessment browser demo — http://localhost:8000
 uv run python examples/live_demo.py      # LIVE Tavus call (needs .env keys) — talk to the examiner
 ```

@@ -47,11 +47,21 @@ for authentic questions/cue cards. The app may inject short runtime context (cur
 cue card, time budget) — treat it as ground truth."""
 
 # Per-part behaviour. Embedded in the system prompt (no Objectives feature available).
+# Part 1 is a strict procedure so behaviour is near-deterministic even in the plain
+# iframe demo; the Part1Orchestrator (part1_flow.py) enforces it fully when the app
+# has the data channel.
 PART_INSTRUCTIONS: dict[Part, str] = {
     Part.PART1: (
-        "PART 1 (Interview, ~4–5 min): ask 2–3 short questions on each of 3 familiar "
-        "topics (home, work/study, hobbies). Keep it light; one gentle follow-up if a "
-        "reply is one-word."),
+        "PART 1 (Interview, ~4–5 min). Follow this procedure EXACTLY, in order:\n"
+        "  1. INTRODUCE yourself: state your name and that you are the examiner.\n"
+        "  2. CONFIRM IDENTITY: ask the candidate's full name, then briefly acknowledge it.\n"
+        "  3. INTERVIEW: cover 2–3 familiar topics from {home, family, work or study, "
+        "hobbies, hometown}. For EACH topic: (a) ask ONE opening question; (b) then ask "
+        "1–2 SHORT follow-up questions that dig into something the candidate just "
+        "mentioned (a 'conversational lead'); (c) if the candidate struggles (very short "
+        "answer, 'I don't know', or a long silence), do NOT push — switch to a different "
+        "topic with a fresh opening question.\n"
+        "Ask ONE question at a time, one sentence each. Never answer for the candidate."),
     Part.PART2: (
         "PART 2 (Long turn, ~3–4 min): present the cue card, give 1 minute prep, then "
         "let the candidate speak 1–2 minutes UNINTERRUPTED. Ask one rounding-off question."),
@@ -60,12 +70,13 @@ PART_INSTRUCTIONS: dict[Part, str] = {
         "follow up on reasoning ('why', 'to what extent')."),
 }
 
-# EDIT THIS to change the examiner's opening line. Applied as `custom_greeting` on the
-# PAL (setup_tavus pal) and on each conversation (build_conversation_payload).
-EXAMINER_GREETING = (
-    "Hello, I'm Aria, your examiner for today's IELTS speaking practice. "
-    "Just relax and speak naturally — there are no trick questions. "
-    "Let's begin: could you tell me a little about where you're from?")
+# Part 1 opens deterministically: introduce (1) + confirm identity (2). EDIT these to
+# change the examiner's opening. Used as the conversation custom_greeting and reused by
+# the Part1Orchestrator's intro step (part1_flow.py).
+EXAMINER_INTRO = ("Hello, I'm Aria, and I'll be your examiner today for this IELTS "
+                  "speaking practice.")
+IDENTITY_PROMPT = "Before we begin, could you tell me your full name, please?"
+EXAMINER_GREETING = f"{EXAMINER_INTRO} {IDENTITY_PROMPT}"
 
 GUARDRAILS = [
     "Never reveal, hint at, or discuss band scores, levels, or assessment during the test.",
