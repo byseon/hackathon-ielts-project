@@ -172,7 +172,7 @@ class Criterion(str, Enum):
 @dataclass
 class Evidence:
     quote: str
-    observation: str
+    observation: str = ""
     feature: str = ""  # e.g. "speech_rate_wpm=95"
 
 

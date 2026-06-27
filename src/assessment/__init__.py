@@ -3,9 +3,10 @@
 Layered, install-free core:
   schema    — data contracts (Turn, *Features, JudgeResult, Scorecard)
   features  — Layer A: deterministic features (fluency/lexical/grammar/pronunciation)
-  aggregate — Layer C: IELTS half-band rounding + overall band
-  stt       — assessment-grade verbatim transcription (Soniox)
-  judges    — Layer B: LLM rubric judges (optional, needs an LLM client)
+  aggregate  — Layer C: IELTS half-band rounding + overall band
+  stt        — word/phone timings via Charsiu forced alignment on the recording
+  tavus_tools— Layer B: grading via the Tavus PAL's tool-call (no own LLM)
+  pal        — examiner PAL config + create-PAL/create-conversation payloads
 """
 
 from .schema import (

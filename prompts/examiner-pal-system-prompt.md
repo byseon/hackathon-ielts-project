@@ -1,24 +1,28 @@
 # Examiner PAL — System Prompt
 
-> Goes in the PAL's top-level `system_prompt`. Keep the *live* context lean (< 5k tokens):
-> this prompt + a small injected state block. Two variants share a base; the differences are
-> marked **[EXAM]** vs **[COACH]**. Test structure is driven by your app pushing
-> `conversation.overwrite-context` at each transition, not by the model improvising.
+> **`src/assessment/pal.py` is the canonical, code source for these prompts** (sent at
+> the API level via `build_pal_payload` / `build_conversation_payload`). This file is the
+> annotated human spec. Keep the *live* context lean (< 5k tokens). `[EXAM]` vs `[COACH]`
+> mark the two variants; part transitions are driven by the app via `overwrite-context`.
 
 ---
 
-## Where each piece goes in the Tavus PAL editor
+## Where each piece goes (API-level, mirrored from `pal.py`)
 
-The IELTS "script" is split across PAL fields (not all in the system prompt):
+**UI** (set in the dashboard): custom greeting, Knowledge (custom text), Guardrails.
+**API payload** (`pal.py`): system prompt, STT/model, tools, part selection. Objectives
+aren't available, so the 3-part structure lives in the system prompt; guardrails can be
+in the UI *or* folded into the prompt (we do the latter for reproducibility).
 
-| PAL editor field | Put this here |
+| Where | Put this here |
 |---|---|
-| **Advanced settings → system prompt** | the *Base system prompt* below (persona, style) |
-| **Advanced settings → Model / STT** | hosted Llama 3.3 (or pick); **STT = `tavus-soniox`** |
-| **Custom Greeting** | the *Greeting* below |
-| **Objectives** | the *Objectives spec* below — one per part (makes parts modular) |
-| **Guardrails** | the *Guardrails* below |
-| **Knowledge** | band descriptors + question bank + exemplars (tags `ielts-*`) |
+| API `system_prompt` | *Base system prompt* + *Test structure* + *Guardrails* (all below) |
+| API `layers.stt.stt_engine` | **`tavus-soniox`** (keeps fillers); `layers.llm.model` = hosted LLM |
+| UI **Custom Greeting** (or API `custom_greeting`) | the *Greeting* below |
+| API `conversational_context` | which parts to run (user-selected subset) |
+| UI **Knowledge** (custom text or files) | band descriptors + question bank (tags `ielts-rubric` / `ielts-questions`) |
+| UI **Guardrails** (or folded into prompt) | the *Guardrails* below |
+| assessment tool | register `submit_ielts_assessment` + attach to PAL (see `tavus_tools.py`) |
 
 ---
 
@@ -106,30 +110,28 @@ Whenever you're ready, we'll begin.
 
 ---
 
-## Objectives spec (Objectives field — one objective per part)
+## Test structure (in the system prompt — Objectives unavailable on this plan)
 
-Encoding the parts as Objectives is what lets the user practice **any subset** and
-makes "multiple parts = one continuous conversation" work. Each objective completes
-before the next begins; the app enables only the objectives the user selected.
+`pal.build_system_prompt(parts)` embeds the per-part instructions into the system
+prompt for the selected parts, and `build_conversation_payload(parts=...)` tells the
+PAL which to run this session via `conversational_context`. That is how the user
+practices **any subset**, and "multiple parts = one continuous conversation" works.
 
 ```
-Objective 1 — "Part 1: Interview"
-  Goal: ask 2–3 short questions on each of 3 familiar topics (from Knowledge:
-        tag ielts-questions). Elicit extended answers; one gentle follow-up if a
-        reply is one-word. Complete after ~4–5 minutes or 3 topics covered.
-
-Objective 2 — "Part 2: Long turn"
-  Goal: present the cue card (from STATE / Knowledge). Give 1 minute prep, then let
-        the candidate speak 1–2 minutes UNINTERRUPTED. Ask one rounding-off question.
-        Complete when they finish or at 2 minutes.
-
-Objective 3 — "Part 3: Discussion"
-  Goal: ask 4–6 abstract questions extending the Part 2 topic; follow up on reasoning
-        ("why", "to what extent"). Complete after ~4–5 minutes.
+PART 1 (Interview, ~4–5 min): 2–3 short questions on each of 3 familiar topics
+  (from Knowledge, tag ielts-questions); one gentle follow-up if a reply is one-word.
+PART 2 (Long turn, ~3–4 min): present the cue card; 1 min prep; 1–2 min UNINTERRUPTED;
+  one rounding-off question.
+PART 3 (Discussion, ~4–5 min): 4–6 abstract questions extending the Part 2 topic;
+  follow up on reasoning ("why", "to what extent").
 ```
 
-Selection: if the user picks only Part 2, enable only Objective 2. When multiple are
-enabled, run them in order in the same conversation (continuous).
+Selection: pass only the chosen parts to `build_conversation_payload(parts=[...])`;
+when multiple are passed they run in order in one conversation (continuous).
+
+At the **end** of the test, the app appends `build_grading_context(features)` +
+`GRADING_INSTRUCTION` (from `tavus_tools.py`) so the PAL calls `submit_ielts_assessment`
+— the grading step, using the Tavus LLM (no separate LLM).
 
 ---
 

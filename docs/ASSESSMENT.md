@@ -18,10 +18,10 @@ specific, quoted, pronunciation-aware feedback.
 | Customize which part(s) to practice | **Per-Part modules** (`parts/`); app passes a `TestPlan` = ordered subset of parts |
 | Examiner random every time | Pick a random **Face id** from a curated pool per session (PAL stays constant) |
 | Username, no password; history saved & viewable | App DB keyed by username + Tavus `memory_stores:["ielts_{username}"]` for continuity |
-| Real 3-part structure in PAL prompt + objectives | **Objectives** encode Part 1→2→3 steps; system prompt holds the persona |
-| Parts modular; multiple parts = continuous convo | One Conversation; app advances Objectives / injects `overwrite-context` per part |
-| Call ends → transcript → **Claude grades** 4 criteria, band 0–9 + quoted feedback | Async **Assessment Engine**: features → Claude rubric judges → Scorecard |
-| "Transcript is not enough — pronunciation matters" | **Charsiu GOP** on per-turn audio feeds the Pronunciation judge |
+| Real 3-part structure in PAL prompt | Structure lives in the **system prompt** (Objectives unavailable; greeting/Knowledge/Guardrails set in UI, the rest via API); see `pal.py` |
+| Parts modular; multiple parts = continuous convo | One Conversation; app selects the part subset via `conversational_context` / `overwrite-context` |
+| Call ends → transcript → LLM grades 4 criteria, band 0–9 + quoted feedback | **Tavus PAL calls `submit_ielts_assessment`** (its own LLM); we parse the tool-call into a `Scorecard` — no own LLM |
+| "Transcript is not enough — pronunciation matters" | **Charsiu GOP** measurements injected into the call as grading context (`build_grading_context`) |
 | Clean report card | `Scorecard` JSON → report UI; `CoachingSession.conversational_summary()` |
 
 ---
@@ -36,12 +36,14 @@ have conflicting requirements, and the in-call LLM degrades past ~5k tokens — 
  IN-CALL (Tavus CVI, low latency)            ASYNC ASSESSMENT ENGINE (no latency budget)
  ┌───────────────────────────┐               ┌────────────────────────────────────────┐
  │ Examiner PAL              │  utterances   │ A. features  (fluency/lexical/grammar/   │
- │  • Objectives = 3 parts   │──events──────▶│    pronunciation) from timings + audio   │
- │  • Guardrails             │  + recording  │ B. judges    (Claude, 1 per criterion,   │
- │  • Knowledge Base (RAG)   │   (MP4 audio) │    evidence-grounded, exemplar-anchored) │
- │  • STT tavus-soniox       │               │ C. aggregate (IELTS half-band rounding)  │
- │  • hosted LLM (Llama 3.3) │◀──cues────────│ coaching: features → 1 warm spoken cue   │
- └───────────────────────────┘ append-context└────────────────────────────────────────┘
+ │  • structure in prompt    │──events──────▶│    pronunciation/GOP) from timings+audio │
+ │  • Guardrails (in prompt) │  + recording  │ C. aggregate (IELTS half-band rounding)  │
+ │  • Knowledge Base (RAG)   │   (MP4 audio) │ coaching: features → 1 warm spoken cue   │
+ │  • STT tavus-soniox       │◀─grading ctx──│ (Charsiu/feature measurements injected   │
+ │  • hosted LLM grades via  │  append-ctx   │  as context so the PAL can grade         │
+ │    submit_ielts_assessment│◀──cues────────│  pronunciation it cannot hear)           │
+ └───────────────────────────┘  / tool_call  └────────────────────────────────────────┘
+   B. grade: the PAL's own LLM calls submit_ielts_assessment → we parse it (no own LLM)
                                 / echo                         │
                                                                ▼  Scorecard + report card
 ```
@@ -61,12 +63,13 @@ runs, fillers, repetitions, discourse markers); Lexical (MTLD, rare-word ratio,
 basic-word overuse); Grammar (clause complexity, subordination, T-units via spaCy);
 Pronunciation (Charsiu GOP, or a confidence proxy fallback).
 
-**B — Rubric judges** (`src/assessment/judges/`): four Claude judges, one per
-criterion, each fed *only its* features + transcript + retrieved band descriptors &
-exemplars. Returns `{band, confidence, evidence[], feedback[]}` — **every band must
-cite a quote or feature**. This is how "you said X, a band-7 answer would say Y"
-feedback is produced, and how pronunciation (which Claude can't hear) still gets
-scored — via the GOP features.
+**B — Grading via the Tavus PAL** (`src/assessment/tavus_tools.py`): we register a
+`submit_ielts_assessment` tool and attach it to the PAL; at the end of the test the
+PAL's own LLM calls it and we parse the `conversation.tool_call` event into a
+`Scorecard` (no own LLM). Before grading we inject `build_grading_context(features)`
+— the Charsiu/Layer-A measurements — and the Knowledge-base band descriptors, so each
+band is grounded ("you said X; a band-7 answer would say Y") and **pronunciation
+(which the LLM can't hear) is scored from the GOP measurements**.
 
 **C — Aggregate** (`src/assessment/aggregate.py`): mean of the four bands, rounded
 to the nearest half-band by the official rule (.25→.5, .75→next whole). Each
@@ -82,7 +85,7 @@ Fluency←Part 2, Grammar←Part 3).
 | D1 | **Two brains** (in-call examiner vs async assessor) | Latency vs rigor conflict; Tavus LLM degrades >5k tokens | Scoring inside the conversation |
 | D2 | **All-Tavus** for STT + LLM + Knowledge Base (one key) | Bundled with hackathon credits; fewer secrets | Separate Soniox / vector DB / LLM keys |
 | D3 | **Charsiu (MIT)** for pronunciation **and** word timings | Open, local, no key; alignment does double duty (GOP + timings) | Azure Speech (lock-in, extra key) |
-| D4 | **Claude** as judge LLM, via OpenAI-compatible client | User story; low-hallucination, strong rubric reasoning | Single generalist scorer |
+| D4 | **Grade via the Tavus PAL's tool-call** (`submit_ielts_assessment`) | Reuse Tavus's LLM → zero extra keys; features injected as context keep it grounded | Running our own (Claude) judge LLM |
 | D5 | **STT = tavus-soniox** | Keeps fillers/disfluencies that Fluency is scored on | Whisper (normalises fillers away) |
 | D6 | **Per-Part modules** | Team builds one part at a time; parts reveal different criteria | One monolithic assessor |
 | D7 | **Evidence-grounded + exemplar calibration** | LLMs are uncalibrated scoring in the abstract; citations enable feedback | "Just ask the LLM for a band" |
@@ -98,7 +101,8 @@ src/assessment/
   schema.py        data contracts: Turn, *Features, JudgeResult, Scorecard
   config.py        env config (one TAVUS_API_KEY covers STT/LLM/RAG)
   features/        Layer A: fluency, lexical, grammar, pronunciation
-  judges/          Layer B: OpenAI-compatible client + 4 rubric judges
+  tavus_tools.py   Layer B: submit_ielts_assessment tool + grading context + event parser
+  pal.py           examiner PAL config + create-PAL/create-conversation payloads
   aggregate.py     Layer C: IELTS half-band rounding
   parts/           per-Part modules (Part1/2/3): structure, questions, cue policy
   coaching.py      features → conversational coaching cue (mode/part gated)
@@ -108,12 +112,13 @@ examples/
   demo.py          end-to-end Layer-A demo (no deps)
   server.py        zero-dependency browser demo for functionality testing
 scripts/
-  setup_tavus.py   configure the Examiner PAL + upload Knowledge Base docs
+  setup_tavus.py   patch the Examiner PAL, register+attach the assessment tool
 ```
 
-Status: Layers A & C and coaching/session/parts are implemented and tested
-(33 tests). Layer-B judges and the Charsiu/forced-alignment backends are scaffolded
-behind clean interfaces (proxy fallbacks keep everything runnable now).
+Status: Layers A & C, coaching/session/parts, PAL payloads, and the Tavus grading
+tool (schema + event parser + grading context) are implemented and tested. The
+Charsiu forced-alignment/GOP backend is scaffolded behind a clean interface (a
+zero-dep proxy keeps everything runnable now).
 
 ---
 
@@ -122,31 +127,28 @@ behind clean interfaces (proxy fallbacks keep everything runnable now).
 You already have an Examiner PAL: **`pece42dab07f`** ("test examiner"). To make it
 exam-ready, configure it in the PAL editor (or run `scripts/setup_tavus.py`):
 
-1. **Advanced settings** → paste the Examiner **system prompt**
-   (`prompts/examiner-pal-system-prompt.md`); set **Model** (hosted Llama 3.3 is
-   fine) and **STT engine = `tavus-soniox`**.
-2. **Custom Greeting** → e.g. *"Hello, I'm Aria. Welcome to your IELTS speaking
-   practice. Shall we begin?"*
-3. **Objectives** → encode the 3-part flow (one objective per part — see the
-   Objectives spec in `prompts/examiner-pal-system-prompt.md`). This is what makes
-   the parts modular and lets the user pick a subset.
-4. **Guardrails** → "Never reveal band scores or assessment during the test", "Never
-   supply vocabulary or correct the candidate" (exam mode), "Stay on the current
-   topic".
-5. **Knowledge** → upload the band descriptors + question bank + exemplars (tags
-   `ielts-rubric`, `ielts-questions`, `ielts-exemplars`).
-6. **Faces** → collect a **pool of Face ids** (stock faces are fine) so the app can
-   pick a random examiner per session. Note each id.
-7. **Recording** → on Conversation create, set `properties.enable_recording=true`
-   and a `recording_storage` bucket (S3/GCS) + a `callback_url` webhook so we receive
-   `application.recording_ready` (the per-turn audio the pronunciation layer needs).
-8. **`.env`** → `cp .env.example .env`; set `TAVUS_API_KEY`,
-   `TAVUS_PAL_ID=pece42dab07f`, a `TAVUS_FACE_ID` (or the pool in app config), and —
-   if judging with Claude — `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`.
+The prompts live in code (`src/assessment/pal.py`) so they're set **at the API
+level**, not hand-edited in the dashboard. `scripts/setup_tavus.py` automates this.
 
-Open question to confirm with Tavus: whether their hosted LLM is callable
-**standalone** for off-call judging. If not, point `LLM_BASE_URL` at Anthropic's
-OpenAI-compatible endpoint for the Claude judges (per the user story).
+1. **System prompt** → `pal.build_pal_payload()` sends the examiner prompt (persona
+   + 3-part structure + guardrails folded in, since Objectives/Guardrails are gated)
+   and **STT = `tavus-soniox`**. (`uv run python scripts/setup_tavus.py pal --execute`)
+2. **Assessment tool** → register `submit_ielts_assessment` (`POST /v2/tools`) and
+   attach it to the PAL (`POST /v2/pals/{id}/tools`).
+   (`uv run python scripts/setup_tavus.py tool --execute`)
+3. **Knowledge** → add the band descriptors + question bank as **custom text** (the
+   Knowledge field accepts text) or upload files; tag `ielts-rubric` / `ielts-questions`.
+4. **Faces** → collect a **pool of Face ids** (stock faces fine) for the random
+   examiner. `setup_tavus.py faces` lists them.
+5. **Per conversation** (`pal.build_conversation_payload()`): pick a random `face_id`,
+   pass the selected `parts`, `username` (→ `memory_stores`), `enable_recording=true`,
+   and a `callback_url` so we receive `application.recording_ready` (the audio the
+   pronunciation layer needs). At the end, append `build_grading_context(features)` +
+   `GRADING_INSTRUCTION` so the PAL calls the assessment tool.
+6. **`.env`** → `cp .env.example .env`; set `TAVUS_API_KEY`,
+   `TAVUS_PAL_ID=pece42dab07f`, `TAVUS_FACE_ID` (or the pool in app config). No LLM key.
+
+Grading uses the Tavus LLM via the tool-call, so there is **no separate LLM key**.
 
 ---
 

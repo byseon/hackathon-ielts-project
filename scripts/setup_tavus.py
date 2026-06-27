@@ -1,15 +1,15 @@
-"""Configure the Tavus Examiner PAL + Knowledge Base from the CLI.
+"""Configure the Tavus Examiner PAL + assessment tool + Knowledge from the CLI.
 
-    uv run python scripts/setup_tavus.py faces            # list face ids (for the random pool)
-    uv run python scripts/setup_tavus.py upload docs/knowledge/rubric.pdf --tags ielts-rubric
-    uv run python scripts/setup_tavus.py pal --pal pece42dab07f --prompt prompts/examiner-pal-system-prompt.md
+    uv run python scripts/setup_tavus.py faces                       # list face ids (random pool)
+    uv run python scripts/setup_tavus.py pal --face <face_id> --execute     # patch the examiner PAL
+    uv run python scripts/setup_tavus.py tool --execute                     # register + attach grading tool
+    uv run python scripts/setup_tavus.py upload docs/knowledge/rubric.txt --tags ielts-rubric --execute
 
 Reads TAVUS_API_KEY from .env (see .env.example). DRY-RUN by default — prints the
 request it would send; pass --execute to actually call the API. Stdlib only.
 
-NOTE: Tavus API request bodies evolve; fields marked VERIFY against current docs
-(https://docs.tavus.io/api-reference/overview). The UI (your PAL editor) can do all
-of this too — this script just automates the tedious parts (bulk doc upload, faces).
+Contracts verified against docs.tavus.io. Prompts/tool come from the code
+(`assessment.pal`, `assessment.tavus_tools`) so config lives in git, not the dashboard.
 """
 
 from __future__ import annotations
@@ -21,7 +21,9 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from assessment.config import config  # noqa: E402
+from assessment.config import config          # noqa: E402
+from assessment import pal                     # noqa: E402
+from assessment.tavus_tools import ASSESSMENT_TOOL  # noqa: E402
 
 BASE = "https://tavusapi.com/v2"
 
@@ -44,51 +46,41 @@ def _call(method: str, path: str, body: dict | None, execute: bool) -> dict | No
 
 
 def cmd_faces(args) -> None:
-    """List available faces so you can build the random-examiner pool."""
+    """List faces so you can build the random-examiner pool."""
     out = _call("GET", "/faces", None, args.execute)
     if out:
-        faces = out.get("data", out if isinstance(out, list) else [])
-        for f in faces:
-            print(f"{f.get('face_id', f.get('replica_id', '?'))}  {f.get('face_name', f.get('replica_name', ''))}")
-
-
-def cmd_upload(args) -> None:
-    """Upload a Knowledge Base document under one or more tags (RAG)."""
-    path = Path(args.file)
-    # VERIFY: Tavus may accept a document_url instead of/in addition to file upload.
-    body = {
-        "document_name": path.name,
-        "tags": args.tags,
-        # "document_url": "https://...",  # if hosting the file; else use multipart upload
-    }
-    print(f"Uploading {path} with tags={args.tags}")
-    out = _call("POST", "/documents", body, args.execute)
-    if out:
-        print("document_id:", out.get("document_id"))
-
-
-def _first_code_block(text: str) -> str:
-    """Extract the first ```fenced``` block (the Base system prompt) from markdown."""
-    parts = text.split("```")
-    if len(parts) >= 3:
-        block = parts[1]
-        # drop an optional language tag on the opening fence line
-        return block.split("\n", 1)[1] if "\n" in block else block
-    return text
+        for f in out.get("data", out if isinstance(out, list) else []):
+            print(f"{f.get('face_id', '?')}  {f.get('face_name', '')}")
 
 
 def cmd_pal(args) -> None:
-    """Patch the Examiner PAL with the system prompt + STT engine."""
-    raw = Path(args.prompt).read_text() if args.prompt else ""
-    # If given the markdown doc, send only the Base system prompt code block.
-    prompt = _first_code_block(raw) if args.prompt and args.prompt.endswith(".md") else raw
-    body = {  # VERIFY field names against the current /v2/pals schema
-        "system_prompt": prompt,
-        "layers": {"stt": {"stt_engine": config.tavus_stt_engine}},
-    }
-    if args.greeting:
-        body["custom_greeting"] = args.greeting
+    """Patch the Examiner PAL with the system prompt + STT engine (from assessment.pal)."""
+    face = args.face or config.tavus_face_id
+    if not face:
+        sys.exit("need a default face id: --face <id> (or set TAVUS_FACE_ID)")
+    body = pal.build_pal_payload(default_face_id=face, stt_engine=config.tavus_stt_engine)
     _call("PATCH", f"/pals/{args.pal}", body, args.execute)
+
+
+def cmd_tool(args) -> None:
+    """Register the assessment tool, then attach it to the PAL."""
+    created = _call("POST", "/tools", ASSESSMENT_TOOL, args.execute)
+    tool_id = (created or {}).get("tool_id", "<tool_id>")
+    print("tool_id:", tool_id)
+    _call("POST", f"/pals/{args.pal}/tools", {"tool_ids": [tool_id]}, args.execute)
+
+
+def cmd_upload(args) -> None:
+    """Upload a Knowledge Base document (file path or --text) under tag(s)."""
+    if args.text:
+        body = {"document_name": args.name or "custom-text", "tags": args.tags,
+                "document_text": args.text}            # VERIFY field for custom text
+    else:
+        path = Path(args.file)
+        body = {"document_name": path.name, "tags": args.tags}  # VERIFY: file vs document_url
+    out = _call("POST", "/documents", body, args.execute)
+    if out:
+        print("document_id:", out.get("document_id"))
 
 
 def main() -> None:
@@ -99,16 +91,21 @@ def main() -> None:
 
     sub.add_parser("faces").set_defaults(func=cmd_faces)
 
+    palp = sub.add_parser("pal")
+    palp.add_argument("--pal", default=config.tavus_pal_id or "pece42dab07f")
+    palp.add_argument("--face", help="default face id (else TAVUS_FACE_ID)")
+    palp.set_defaults(func=cmd_pal)
+
+    toolp = sub.add_parser("tool")
+    toolp.add_argument("--pal", default=config.tavus_pal_id or "pece42dab07f")
+    toolp.set_defaults(func=cmd_tool)
+
     up = sub.add_parser("upload")
-    up.add_argument("file")
+    up.add_argument("file", nargs="?")
+    up.add_argument("--text", help="custom knowledge text instead of a file")
+    up.add_argument("--name")
     up.add_argument("--tags", nargs="+", default=["ielts-rubric"])
     up.set_defaults(func=cmd_upload)
-
-    pal = sub.add_parser("pal")
-    pal.add_argument("--pal", default=config.tavus_pal_id, help="PAL id (e.g. pece42dab07f)")
-    pal.add_argument("--prompt", help="path to the system-prompt file")
-    pal.add_argument("--greeting", help="custom greeting text")
-    pal.set_defaults(func=cmd_pal)
 
     args = p.parse_args()
     args.func(args)

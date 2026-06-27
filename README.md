@@ -33,8 +33,9 @@ scoring/analysis happens off-call so it never slows the conversation.
 | `src/assessment/aggregate.py` | **Layer C** — IELTS half-band rounding + overall band |
 | `src/assessment/coaching.py` | features → conversational coaching cue (mode/part gated) |
 | `src/assessment/session.py` | stateful session: live cues, adaptive focus, conversational wrap-up |
-| `src/assessment/stt.py` | assessment-grade verbatim transcription (Soniox) |
-| `src/assessment/judges/` | **Layer B** — LLM rubric judges (prompts in `prompts/`) |
+| `src/assessment/stt.py` | word/phone timings via Charsiu forced alignment on the recording |
+| `src/assessment/tavus_tools.py` | **Layer B** — grading via the Tavus PAL tool-call (no own LLM) + Charsiu/feature grading context |
+| `src/assessment/pal.py` | examiner PAL config + create-PAL / create-conversation payloads (API-level) |
 | `examples/demo.py` | end-to-end Layer-A demo (no deps) |
 | `examples/server.py` | zero-dependency browser demo for functionality testing |
 
@@ -60,17 +61,21 @@ uv pip install -e ".[pron]"      # Charsiu GOP pronunciation + forced alignment 
 uv pip install -e ".[env]"       # optional .env auto-loading (python-dotenv)
 ```
 
-The rubric judges (Layer B) call the **Tavus hosted LLM** over an OpenAI-compatible
-endpoint using stdlib `urllib` — no SDK needed. One `TAVUS_API_KEY` covers STT, the
-LLM, and the Knowledge Base (RAG). See [`.env.example`](.env.example).
+**Grading uses the Tavus LLM, not ours.** The PAL calls a `submit_ielts_assessment`
+tool at the end of the test; we parse the `conversation.tool_call` event into a
+`Scorecard`. One `TAVUS_API_KEY` covers STT, the LLM, and the Knowledge Base — no
+own-LLM key. See [`.env.example`](.env.example).
 
 ## Key engineering decisions
 
-- **STT for assessment is decoupled** from the in-call STT. Re-transcribe the
-  isolated per-turn audio with **disfluencies kept** + word timestamps + confidence
-  (Soniox). Whisper-family ASR normalises fillers away and must not be used here.
+- **Grading via Tavus tool-calling.** No second LLM. Pronunciation (which the LLM
+  can't hear) is grounded by injecting Charsiu/feature measurements into the call as
+  context (`tavus_tools.build_grading_context`) before the PAL calls the tool.
+- **In-call STT keeps fillers** (`tavus-soniox`); word/phone timings come from
+  **Charsiu forced alignment** on the recording — Whisper-family ASR normalises
+  fillers away and must not be used for assessment.
 - **Pronunciation needs acoustics.** Primary path: **Charsiu** (MIT, wav2vec2)
   forced alignment → Goodness-of-Pronunciation. A zero-dep proxy (STT confidence)
   keeps the pipeline runnable until the model is wired.
-- **Scoring is evidence-grounded.** Every judge band must cite a quote or feature;
-  calibration is by comparison to retrieved band exemplars (RAG), not abstraction.
+- **Deterministic features are the rigor backbone** — every band the Tavus LLM
+  produces is anchored to objective measurements + Knowledge-base band descriptors.
