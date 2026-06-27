@@ -116,12 +116,15 @@ def build_pal_payload(*, default_face_id: str, pal_name: str = "IELTS Examiner (
 def build_conversation_payload(*, pal_id: str, face_id: str, username: str,
                                parts: list[Part], topic: str | None = None,
                                callback_url: str | None = None,
-                               mode: str = "exam", max_seconds: int = 1200) -> dict:
+                               mode: str = "exam", max_seconds: int = 1200,
+                               use_memory: bool = False) -> dict:
     """Body for POST /v2/conversations — one mock test for the chosen part(s).
 
     `parts` is the user-selected subset (continuous when more than one) — this is how
     part-selection works without an Objectives feature. `face_id` is a random pick
-    from your face pool ('random examiner'). `username` keys cross-session memory.
+    from your face pool ('random examiner'). `use_memory` keys cross-session memory by
+    username — OFF by default because Tavus logs "Memory service failed to initialize"
+    when the memory feature isn't enabled on the account.
     """
     names = {Part.PART1: "Part 1", Part.PART2: "Part 2", Part.PART3: "Part 3"}
     context = ("IELTS Speaking practice (" + mode + " mode). Run ONLY these parts, in "
@@ -134,7 +137,6 @@ def build_conversation_payload(*, pal_id: str, face_id: str, username: str,
         "conversation_name": f"IELTS {mode} — {username}",
         "conversational_context": context,
         "custom_greeting": EXAMINER_GREETING,
-        "memory_stores": [f"ielts_{username}"],
         "document_tags": DOCUMENT_TAGS,
         "properties": {
             "enable_recording": True,        # per-turn audio for pronunciation
@@ -142,6 +144,8 @@ def build_conversation_payload(*, pal_id: str, face_id: str, username: str,
             "max_call_duration": max_seconds,
         },
     }
+    if use_memory:
+        payload["memory_stores"] = [f"ielts_{username}"]
     if callback_url:
         payload["callback_url"] = callback_url
     return payload

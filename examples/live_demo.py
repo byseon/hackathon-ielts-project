@@ -97,6 +97,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, json.dumps(score_conversation(cid)))
             except Exception as e:
                 return self._send(400, json.dumps({"error": str(e)}))
+        if self.path.startswith("/api/end"):
+            from urllib.parse import urlparse, parse_qs
+            cid = parse_qs(urlparse(self.path).query).get("cid", [""])[0]
+            try:  # ending makes status=ended so transcription_ready fires in ~seconds
+                _tavus("POST", f"/conversations/{cid}/end")
+                return self._send(200, json.dumps({"ok": True}))
+            except Exception as e:
+                return self._send(400, json.dumps({"error": str(e)}))
         self._send(404, json.dumps({"error": "not found"}))
 
     def do_POST(self):
@@ -150,10 +158,10 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8>
 <div id=status></div>
 <div id=frame></div>
 <div class=row>
-  <button onclick=scoreMe()>Score me</button>
+  <button onclick=endAndScore()>End test &amp; score</button>
+  <button class=sec onclick=scoreMe()>Score me (if already ended)</button>
   <button class=sec onclick=fetchTranscript()>Fetch transcript</button>
-  <button class=sec onclick=resetTest()>New test (back to start)</button>
-  <small>(after you end the call)</small>
+  <button class=sec onclick=resetTest()>New test</button>
 </div>
 <div id=score></div>
 <pre id=transcript></pre>
@@ -181,13 +189,8 @@ async function fetchTranscript(){
  document.getElementById('transcript').textContent=JSON.stringify(d,null,2);
 }
 function resetTest(){location.reload();}  // back to the landing page
-async function scoreMe(){
- if(!CID){alert('start a test first');return;}
- const box=document.getElementById('score'); box.textContent='Scoring…';
- const r=await fetch('/api/score?cid='+encodeURIComponent(CID));
- const d=await r.json();
- if(d.error){box.textContent='Error: '+esc(d.error);return;}
- const sc=d.scorecard, crit=sc.criteria;
+function renderScore(d){
+ const box=document.getElementById('score'), sc=d.scorecard, crit=sc.criteria;
  const pill=(k)=>'<span class=pill style="display:inline-block;background:#eee;border-radius:20px;padding:2px 9px;margin:2px">'
    +esc(k)+': '+esc(crit[k].band)+'</span>';
  const h=document.createElement('div');
@@ -197,6 +200,25 @@ async function scoreMe(){
    +'<p><small>Real from transcript: lexical, grammar. Placeholders (need audio): '
    +'fluency, pronunciation.</small></p>';
  box.replaceChildren(h);
+}
+async function scoreMe(){
+ if(!CID){alert('start a test first');return;}
+ const box=document.getElementById('score'); box.textContent='Scoring…';
+ const d=await (await fetch('/api/score?cid='+encodeURIComponent(CID))).json();
+ if(d.error){box.textContent='Error: '+esc(d.error);return;}
+ renderScore(d);
+}
+async function endAndScore(){
+ if(!CID){alert('start a test first');return;}
+ const box=document.getElementById('score'); box.textContent='Ending the call…';
+ await fetch('/api/end?cid='+encodeURIComponent(CID));
+ for(let i=0;i<8;i++){
+   await new Promise(r=>setTimeout(r,4000));
+   const d=await (await fetch('/api/score?cid='+encodeURIComponent(CID))).json();
+   if(!d.error){renderScore(d);return;}
+   box.textContent='Waiting for the transcript… ('+((i+1)*4)+'s)';
+ }
+ box.textContent='Transcript still not ready — click "Score me" in a few seconds.';
 }
 </script></body></html>"""
 
