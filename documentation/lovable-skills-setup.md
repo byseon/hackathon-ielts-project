@@ -10,9 +10,9 @@ Import each skill subdirectory (replace branch if not `main`):
 
 | Skill | GitHub URL |
 |-------|------------|
-| responsive-layout | `https://github.com/byseon/hackathon-ielts-project/tree/main/skills/responsive-layout` |
-| accessibility-speaklab | `https://github.com/byseon/hackathon-ielts-project/tree/main/skills/accessibility-speaklab` |
-| i18n-foundation | `https://github.com/byseon/hackathon-ielts-project/tree/main/skills/i18n-foundation` |
+| responsive-layout | `https://github.com/byseon/hackathon-ielts-project-new/tree/main/skills/responsive-layout` |
+| accessibility-speaklab | `https://github.com/byseon/hackathon-ielts-project-new/tree/main/skills/accessibility-speaklab` |
+| i18n-foundation | `https://github.com/byseon/hackathon-ielts-project-new/tree/main/skills/i18n-foundation` |
 
 For each imported skill:
 

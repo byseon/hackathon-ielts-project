@@ -2,6 +2,8 @@
 
 IELTS Speaking prep for English learners — AI video practice, personalized plans from mock exams.
 
+**GitHub:** Lovable syncs the live app to [`byseon/hackathon-ielts-project-new`](https://github.com/byseon/hackathon-ielts-project-new). This local folder is the original scaffold; see [GITHUB_SETUP.md](GITHUB_SETUP.md).
+
 ## Stack
 
 - React 19 + Vite + TypeScript + Tailwind CSS 4
