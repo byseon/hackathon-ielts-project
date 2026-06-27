@@ -32,6 +32,7 @@ class Config:
     tavus_stt_engine: str = _get("TAVUS_STT_ENGINE", "tavus-soniox")
     tavus_document_tags: tuple[str, ...] = tuple(
         t.strip() for t in _get("TAVUS_DOCUMENT_TAGS").split(",") if t.strip())
+    tavus_callback_url: str = _get("TAVUS_CALLBACK_URL")
 
     # Pronunciation + word-timing backbone (local Charsiu)
     charsiu_model: str = _get("CHARSIU_MODEL", "charsiu/en_w2v2_fc_10ms")

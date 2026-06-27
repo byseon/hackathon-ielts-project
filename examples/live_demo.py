@@ -19,11 +19,15 @@ import urllib.request
 import urllib.error
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+from dataclasses import asdict
+
 from assessment.config import config
 from assessment import pal
 from assessment.schema import Part
+from assessment.webhook import ConversationStore, handle_event
 
 TAVUS = "https://tavusapi.com/v2"
+STORE = ConversationStore()
 
 
 def _tavus(method: str, path: str, body: dict | None = None) -> dict:
@@ -40,7 +44,8 @@ def start_conversation(username: str, parts: list[int]) -> dict:
     payload = pal.build_conversation_payload(
         pal_id=config.tavus_pal_id, face_id=config.tavus_face_id,
         username=username or "guest",
-        parts=[Part(p) for p in parts] or [Part.PART1, Part.PART2, Part.PART3])
+        parts=[Part(p) for p in parts] or [Part.PART1, Part.PART2, Part.PART3],
+        callback_url=config.tavus_callback_url or None)
     out = _tavus("POST", "/conversations", payload)
     return {"conversation_url": out.get("conversation_url"),
             "conversation_id": out.get("conversation_id")}
@@ -66,14 +71,26 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, json.dumps(out))
             except Exception as e:
                 return self._send(400, json.dumps({"error": str(e)}))
+        if self.path.startswith("/api/result"):
+            from urllib.parse import urlparse, parse_qs
+            cid = parse_qs(urlparse(self.path).query).get("cid", [""])[0]
+            return self._send(200, json.dumps(asdict(STORE.get(cid))))
         self._send(404, json.dumps({"error": "not found"}))
 
     def do_POST(self):
+        n = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(n) or b"{}"
+        # Tavus posts call/recording/tool events here (set TAVUS_CALLBACK_URL).
+        if self.path == "/webhook":
+            try:
+                ack = handle_event(json.loads(raw), STORE)
+                return self._send(200, json.dumps(ack))
+            except Exception as e:
+                return self._send(400, json.dumps({"error": str(e)}))
         if self.path != "/api/start":
             return self._send(404, json.dumps({"error": "not found"}))
         try:
-            n = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(n) or b"{}")
+            body = json.loads(raw)
             out = start_conversation(body.get("username", ""),
                                      [int(p) for p in body.get("parts", [])])
             self._send(200, json.dumps(out))
