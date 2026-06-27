@@ -1,6 +1,6 @@
 """Zero-dependency demo frontend for functionality testing.
 
-    PYTHONPATH=src python examples/server.py   # then open http://localhost:8000
+    uv run python examples/server.py   # then open http://localhost:8000
 
 Pick a preset answer (with real word timings), choose exam/coach mode, and see the
 full backend output: Layer-A features, the coaching cues the PAL would say, a

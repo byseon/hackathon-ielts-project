@@ -1,6 +1,6 @@
 """End-to-end Layer-A demo on a synthetic Part-2 answer. Runs with zero deps:
 
-    PYTHONPATH=src python examples/demo.py
+    uv run python examples/demo.py        # (or: PYTHONPATH=src python examples/demo.py)
 
 Shows what the voice-ML backend produces per turn (the evidence the judges score),
 plus an illustrative aggregation with example criterion bands.

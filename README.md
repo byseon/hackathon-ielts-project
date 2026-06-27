@@ -38,27 +38,26 @@ scoring/analysis happens off-call so it never slows the conversation.
 | `examples/demo.py` | end-to-end Layer-A demo (no deps) |
 | `examples/server.py` | zero-dependency browser demo for functionality testing |
 
-## Run it (no install needed)
+## Run it (with [uv](https://docs.astral.sh/uv/))
 
 ```bash
-# unit tests
-python -m pytest -q
+uv venv && uv pip install -e ".[dev]"   # core is pure stdlib; this just adds pytest
 
-# CLI demo (prints features + scorecard for a synthetic Part-2 turn)
-PYTHONPATH=src python examples/demo.py
-
-# browser demo — open http://localhost:8000
-PYTHONPATH=src python examples/server.py
+uv run pytest -q                         # unit tests
+uv run python examples/demo.py           # CLI demo: features + scorecard for a turn
+uv run python examples/server.py         # browser demo — open http://localhost:8000
 ```
 
-The core (schema + fluency + lexical + aggregation + coaching) is **pure stdlib**.
+No-install option (core is **pure stdlib** — schema, fluency, lexical, aggregation,
+coaching): `PYTHONPATH=src python examples/demo.py`.
+
 Heavier capabilities are optional extras, gated so they never block the core:
 
 ```bash
-pip install -e ".[lexical]"   # rare-word frequency bands (wordfreq)
-pip install -e ".[nlp]"       # grammar parsing (spaCy) + python -m spacy download en_core_web_sm
-pip install -e ".[pron]"      # Charsiu GOP pronunciation + forced alignment (torch/transformers)
-pip install -e ".[env]"       # optional .env auto-loading (python-dotenv)
+uv pip install -e ".[lexical]"   # rare-word frequency bands (wordfreq)
+uv pip install -e ".[nlp]"       # grammar parsing (spaCy) + uv run python -m spacy download en_core_web_sm
+uv pip install -e ".[pron]"      # Charsiu GOP pronunciation + forced alignment (torch/transformers)
+uv pip install -e ".[env]"       # optional .env auto-loading (python-dotenv)
 ```
 
 The rubric judges (Layer B) call the **Tavus hosted LLM** over an OpenAI-compatible

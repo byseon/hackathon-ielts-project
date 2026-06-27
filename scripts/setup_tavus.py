@@ -1,8 +1,8 @@
 """Configure the Tavus Examiner PAL + Knowledge Base from the CLI.
 
-    PYTHONPATH=src python scripts/setup_tavus.py faces            # list face ids (for the random pool)
-    PYTHONPATH=src python scripts/setup_tavus.py upload docs/knowledge/rubric.pdf --tags ielts-rubric
-    PYTHONPATH=src python scripts/setup_tavus.py pal --pal pece42dab07f --prompt prompts/examiner-pal-system-prompt.md
+    uv run python scripts/setup_tavus.py faces            # list face ids (for the random pool)
+    uv run python scripts/setup_tavus.py upload docs/knowledge/rubric.pdf --tags ielts-rubric
+    uv run python scripts/setup_tavus.py pal --pal pece42dab07f --prompt prompts/examiner-pal-system-prompt.md
 
 Reads TAVUS_API_KEY from .env (see .env.example). DRY-RUN by default — prints the
 request it would send; pass --execute to actually call the API. Stdlib only.
