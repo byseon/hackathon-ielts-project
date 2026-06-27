@@ -162,6 +162,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8>
 <div class=row>
   <button onclick=scoreMe()>Score me</button>
   <button class=sec onclick=fetchTranscript()>Fetch transcript</button>
+  <button class=sec onclick=resetTest()>New test (back to start)</button>
   <small>(after you end the call)</small>
 </div>
 <div id=score></div>
@@ -189,6 +190,7 @@ async function fetchTranscript(){
  const d=await r.json();
  document.getElementById('transcript').textContent=JSON.stringify(d,null,2);
 }
+function resetTest(){location.reload();}  // back to the landing page
 async function scoreMe(){
  if(!CID){alert('start a test first');return;}
  const box=document.getElementById('score'); box.textContent='Scoring…';

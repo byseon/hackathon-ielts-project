@@ -54,12 +54,21 @@ def cmd_faces(args) -> None:
 
 
 def cmd_pal(args) -> None:
-    """Patch the Examiner PAL with the system prompt + STT engine (from assessment.pal)."""
+    """Patch the Examiner PAL with the system prompt + face (from assessment.pal).
+
+    /v2/pals PATCH uses JSON Patch (RFC 6902): a list of {op,path,value} operations,
+    not a full object. We replace the essential fields; set the STT engine in the UI
+    (or via a separate patch) to avoid clobbering default layers.
+    """
     face = args.face or config.tavus_face_id
     if not face:
         sys.exit("need a default face id: --face <id> (or set TAVUS_FACE_ID)")
-    body = pal.build_pal_payload(default_face_id=face, stt_engine=config.tavus_stt_engine)
-    _call("PATCH", f"/pals/{args.pal}", body, args.execute)
+    full = pal.build_pal_payload(default_face_id=face, stt_engine=config.tavus_stt_engine)
+    patch = [
+        {"op": "replace", "path": "/system_prompt", "value": full["system_prompt"]},
+        {"op": "replace", "path": "/default_face_id", "value": face},
+    ]
+    _call("PATCH", f"/pals/{args.pal}", patch, args.execute)
 
 
 def cmd_tool(args) -> None:
@@ -86,21 +95,24 @@ def cmd_upload(args) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--execute", action="store_true", help="actually call the API")
+    # shared --execute so it works either before OR after the subcommand
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--execute", action="store_true", help="actually call the API")
+    p.add_argument("--execute", action="store_true", help=argparse.SUPPRESS)
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("faces").set_defaults(func=cmd_faces)
+    sub.add_parser("faces", parents=[common]).set_defaults(func=cmd_faces)
 
-    palp = sub.add_parser("pal")
-    palp.add_argument("--pal", default=config.tavus_pal_id or "pece42dab07f")
+    palp = sub.add_parser("pal", parents=[common])
+    palp.add_argument("--pal", default="pece42dab07f")
     palp.add_argument("--face", help="default face id (else TAVUS_FACE_ID)")
     palp.set_defaults(func=cmd_pal)
 
-    toolp = sub.add_parser("tool")
-    toolp.add_argument("--pal", default=config.tavus_pal_id or "pece42dab07f")
+    toolp = sub.add_parser("tool", parents=[common])
+    toolp.add_argument("--pal", default="pece42dab07f")
     toolp.set_defaults(func=cmd_tool)
 
-    up = sub.add_parser("upload")
+    up = sub.add_parser("upload", parents=[common])
     up.add_argument("file", nargs="?")
     up.add_argument("--text", help="custom knowledge text instead of a file")
     up.add_argument("--name")
