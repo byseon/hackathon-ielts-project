@@ -28,15 +28,15 @@ CVI pipeline order: **Perception (Raven) → Conversational Flow (Sparrow) → S
 | Persona (behaviour, prompt, layers) | **PAL** | The Examiner. One PAL, two prompt variants (exam vs coach). |
 | Visual avatar (Phoenix) | **Face** | A calm, professional examiner face. |
 | Live session | **Conversation** | One IELTS test = one conversation. |
-| Speech-to-text | `layers.stt.stt_engine` | **`tavus-parakeet`** — English/European-optimised, low latency, word-level timestamps. ([stt](https://docs.tavus.io/sections/conversational-video-interface/pal/stt)) |
-| Reasoning | `layers.llm` | Examiner dialogue only. Built-in `tavus-glm-4.7` (default) is fine; or bring-your-own OpenAI-compatible endpoint. ([llm](https://docs.tavus.io/sections/conversational-video-interface/pal/llm)) |
+| Speech-to-text | `layers.stt.stt_engine` | **`tavus-soniox`** — keeps fillers/disfluencies (which Fluency is scored on). Word/phone timings come from forced alignment (§6), not the STT. ([stt](https://docs.tavus.io/sections/conversational-video-interface/pal/stt)) |
+| Reasoning | `layers.llm` | Tavus hosts an OpenAI-compatible LLM (default Llama 3.3 70B). Used for the examiner dialogue **and** reusable for the off-call judges — one Tavus key. ([llm](https://docs.tavus.io/sections/conversational-video-interface/pal/llm)) |
 | Real-time events | Daily WebRTC data channel (`app-message`) | Receive `conversation.utterance`, `started/stopped_speaking`; send `echo`, `respond`, `overwrite_context`. ([interactions](https://docs.tavus.io/sections/conversational-video-interface/interactions-protocols/overview)) |
 | Cross-session memory | `memory_stores: ["ielts_{userId}"]` | Learner's recurring errors, target band, topics done. ([memories](https://docs.tavus.io/sections/conversational-video-interface/memories)) |
-| Knowledge base / RAG | `document_ids` / `document_tags` | Question bank + official band descriptors attached to the PAL. ([create-conversation](https://docs.tavus.io/api-reference/conversations/create-conversation)) |
-| Recording / captions | `properties.enable_recording`, `enable_closed_captions` | Post-call audio + transcript fallback. |
+| Knowledge base / RAG | **Tavus Knowledge Base** — `POST /v2/documents` → `document_ids`/`document_tags` | Question bank + official band descriptors uploaded as Tavus documents, ~30 ms retrieval. **No separate vector DB.** ([knowledge-base](https://docs.tavus.io/sections/conversational-video-interface/knowledge-base)) |
+| Recording / captions | `properties.enable_recording`, `enable_closed_captions` | Per-turn audio (MP4 via `application.recording_ready`) → feeds forced alignment + pronunciation. |
 
 ### STT engines available
-`tavus-auto` (default router), **`tavus-parakeet`** (English/European, min latency — our pick), `tavus-soniox` (Indic), `tavus-whisper` (43 langs), `tavus-deepgram-medical`. Configure with `stt_engine` + `hotwords`.
+`tavus-auto` (router), `tavus-parakeet` (English, min latency), **`tavus-soniox`** (keeps fillers — our pick for assessment), `tavus-whisper` (43 langs), `tavus-deepgram-medical`. Configure with `stt_engine` + `hotwords`. The in-call transcript is utterance-level; per-word timing is recovered by forced alignment on the recording (§6).
 
 ### LLM layer — bring-your-own
 ```json
@@ -118,19 +118,26 @@ and returns **structured output**: `{ band, confidence, evidence[] (quotes + whi
 
 RAG here is **not** "answer questions." Three concrete jobs:
 
-1. **Descriptor grounding** — store the full public **band 1–9 descriptors** (we only have the high-level criteria doc; the full descriptors are public) so judges quote real standards instead of inventing them. → PAL `document_ids` for the examiner side; vector store for the judges.
-2. **Exemplar calibration** — a small corpus of **sample answers labelled with official bands** (public IELTS sample responses + examiner commentaries). Retrieve nearest exemplars to the learner's answer → few-shot anchoring. *This is the biggest reliability lever.* → judges' vector store.
-3. **Question bank** — authentic **Part 1 / Part 2 cue cards / Part 3** questions by topic, so the examiner asks realistic, non-repeating questions and Part 3 genuinely extends the Part 2 topic. → PAL `document_tags` (e.g., `topic:travel`).
+Implemented with the **Tavus Knowledge Base** (`POST /v2/documents` → `document_tags`) — no separate vector DB:
+
+1. **Descriptor grounding** — upload the full public **band 1–9 descriptors** as a Tavus document so judges (and the examiner) quote real standards instead of inventing them. Tag: `ielts-rubric`.
+2. **Exemplar calibration** — upload a small corpus of **sample answers labelled with official bands**; the judge LLM retrieves nearest exemplars to the learner's answer → few-shot anchoring. *Biggest reliability lever.* Tag: `ielts-exemplars`.
+3. **Question bank** — authentic **Part 1 / cue cards / Part 3** questions by topic so the examiner asks realistic, non-repeating questions and Part 3 extends the Part 2 topic. Tag: `ielts-questions`.
 
 ---
 
 ## 6. Pronunciation — the hard part (don't hand-wave it)
 
-A transcript can't score pronunciation. You need acoustics. Options, best→pragmatic:
+A transcript can't score pronunciation. You need acoustics. Our pick:
 
-- **Azure AI Speech — Pronunciation Assessment** (recommended for the hackathon): returns Accuracy, Fluency, Completeness, **Prosody**, and **per-phoneme** scores. Maps almost 1:1 onto the IELTS pronunciation indicators (word stress, phoneme production, intonation, intelligibility). Feed it the isolated per-turn audio + the parakeet transcript as reference.
-- **Open GOP** (Goodness-of-Pronunciation): wav2vec2 + forced alignment → per-phoneme posteriors. More work, no vendor lock-in.
-- **Weak proxy** (fallback): parakeet word-confidence + word-timing irregularity + the *fact* STT struggled. Cheap but coarse — use only to flag, not to score.
+- **Charsiu GOP** (MIT, local, recommended): `lingjzhu/charsiu` is a wav2vec2
+  forced aligner whose frame-classification model yields per-phoneme posteriors →
+  **Goodness-of-Pronunciation** per phoneme/word, plus aligned durations for word
+  stress; add an F0 contour for intonation. **Double duty:** the same alignment
+  gives the word/phone timings the Fluency layer needs — so no separate STT for timing.
+- **Weak proxy** (fallback): STT word-confidence + timing irregularity. Cheap and
+  coarse — flags problems, doesn't truly score. Keeps the pipeline runnable until
+  the model is wired (`source="proxy"` tells the judge to down-weight it).
 
 The pronunciation model's outputs become Layer-A features for the Pronunciation judge.
 
@@ -163,10 +170,10 @@ Delivery: **post-test report** (primary) = scorecard + drill-downs + a 1-minute 
 2. **Capture pipeline:** isolated per-turn user audio + word-timings → object store. *(½ day)*
 3. **Layer A features:** fluency + lexical + syntactic metrics from timings/transcript. *(1 day)*
 4. **Layer B judges + RAG:** 4 structured judges, descriptor + exemplar retrieval, comparative scoring. *(1 day)*
-5. **Pronunciation:** Azure Pronunciation Assessment on per-turn audio. *(½ day)*
+5. **Pronunciation:** Charsiu forced alignment + GOP on per-turn audio. *(½ day)*
 6. **Report UI + memory:** scorecard, drill-downs, progress; `memory_stores` continuity. *(1 day)*
 
-Stack: Tavus CVI (front), Node/Python backend, a vector DB (pgvector/Chroma) for RAG, spaCy + word-frequency lists for Layer A, Azure Speech for pronunciation, your own LLM (Claude / `tavus-claude-haiku-4.5` for low-hallucination judging) for Layer B.
+Stack: Tavus CVI (front) — STT + hosted LLM + Knowledge Base under one key; Python backend; spaCy + word-frequency lists for Layer A; Charsiu (MIT) for pronunciation + word timings; the judge LLM is OpenAI-compatible (per the user story, point it at **Claude**) for Layer B.
 
 ---
 

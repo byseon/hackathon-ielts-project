@@ -1,15 +1,19 @@
-"""Assessment-grade transcription (decoupled from the in-call CVI STT).
+"""Where the word/phone timings come from (the fluency layer's backbone).
 
-Why decoupled: the in-call STT (e.g. `tavus-soniox`) drives turn-taking, but the
-`conversation.utterance` events it emits carry text only — not word-level timings
-or confidence. Every fluency feature needs those. So for assessment we re-transcribe
-the *isolated per-turn audio* with disfluencies KEPT, word timestamps, and confidence.
+We do NOT need a separate STT vendor. Tavus handles in-call transcription
+(`tavus-soniox`) and delivers the recording (MP4) via the
+`application.recording_ready` webhook. But the Tavus transcript is utterance-level,
+and fluency features need per-word timing. So:
 
-Soniox is a good fit: opt-in disfluency filtering (off by default keeps um/uh/false
-starts), ms-level token timestamps, and 0-1 confidence. Whisper-family ASR normalises
-fillers away and must NOT be used as the assessment STT.
+  Tavus transcript text  +  recording audio  --Charsiu forced alignment-->  Word[]
+                                                (word + phone boundaries; MIT)
 
-`Transcriber` is the contract; populate `Turn.words` from whichever backend you run.
+Charsiu does double duty: the same alignment that yields GOP for pronunciation
+(see features/pronunciation.py) also yields the word timings used here. One local
+model, no extra API key.
+
+`words_from_tavus_tokens` adapts any word-level export Tavus may provide directly;
+`align_words` is the forced-alignment path. `Transcriber` is the contract.
 """
 
 from __future__ import annotations
@@ -19,39 +23,47 @@ from .schema import Word
 
 
 class Transcriber(Protocol):
-    def transcribe(self, audio_path: str) -> list[Word]: ...
+    def transcribe(self, audio_path: str, reference_text: str = "") -> list[Word]: ...
 
 
-class SonioxTranscriber:
-    """Direct Soniox async transcription -> verbatim Words with timing + confidence.
+class CharsiuAligner:
+    """Forced-alignment 'transcriber': align reference text to audio -> Word timings.
 
-    Keep disfluencies ON (do not enable the filter) so fillers survive for the
-    fluency layer. Lazy HTTP so importing this module needs no extra deps.
+    Requires torch + the charsiu repo (lingjzhu/charsiu). Lazy import so this module
+    needs no heavy deps. Returns word-level Words; phone-level timings/GOP are
+    produced alongside by features/pronunciation.CharsiuGopAssessor.
     """
 
-    def __init__(self, api_key: str, model: str = "stt-async-preview"):
-        self.api_key = api_key
-        self.model = model
+    def __init__(self, model: str | None = None):
+        from .config import config
+        self.model = model or config.charsiu_model
+        self._aligner = None
 
-    def transcribe(self, audio_path: str) -> list[Word]:
-        # Implement against https://soniox.com/docs (upload -> transcribe -> poll).
-        # Map each returned token -> Word(text, start_ms/1000, end_ms/1000, confidence),
-        # WITHOUT enabling disfluency removal. Returns [] until wired.
+    def transcribe(self, audio_path: str, reference_text: str = "") -> list[Word]:
+        if not reference_text:
+            raise ValueError("forced alignment needs the Tavus transcript as reference_text")
+        if self._aligner is None:
+            from Charsiu import charsiu_forced_aligner  # lazy
+            self._aligner = charsiu_forced_aligner(aligner=self.model)
+        # alignment = self._aligner.align(audio=audio_path, text=reference_text)
+        # -> map each word segment to Word(text, start, end); confidence from the
+        #    frame posteriors. Wire to the installed charsiu version.
         raise NotImplementedError(
-            "Call Soniox async API (disfluencies kept) and map tokens to Word(...).")
+            "Run charsiu align(audio, reference_text) and map word segments to Word(...).")
 
 
 def words_from_tavus_tokens(tokens: list[dict[str, Any]]) -> list[Word]:
-    """If a Tavus STT/recording export ever exposes word tokens, adapt them here.
+    """Adapt a word-level transcript export (if available) to Word objects.
 
     Expected token shape: {text|word, start|start_ms, end|end_ms, confidence?}.
+    Use this if a Tavus transcript ever exposes word timings directly; otherwise
+    use CharsiuAligner on the recording audio.
     """
     out: list[Word] = []
     for t in tokens:
         start = t.get("start", t.get("start_ms", 0))
         end = t.get("end", t.get("end_ms", 0))
-        # normalise ms -> s if values look like milliseconds
-        if start > 1000 or end > 1000:
+        if start > 1000 or end > 1000:  # normalise ms -> s
             start, end = start / 1000.0, end / 1000.0
         out.append(Word(t.get("text", t.get("word", "")), float(start), float(end),
                         t.get("confidence")))

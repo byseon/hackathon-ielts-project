@@ -6,8 +6,9 @@ with an evidence-cited band. The full prompts live in
 `prompts/assessor-rubric-judges.md`; condensed instruction stubs are here.
 
 LLM-agnostic: pass any object implementing `LLMClient.complete(system, user) -> str`.
-Import-safe (no anthropic import at module load). Use a low-hallucination model at
-low temperature (e.g. Claude Haiku/Sonnet).
+The default `OpenAICompatibleClient` talks to the Tavus hosted LLM (or any
+OpenAI-compatible endpoint) over stdlib urllib — no SDK dependency. Use a
+low-hallucination model at low temperature for judging.
 """
 
 from __future__ import annotations
@@ -123,20 +124,39 @@ class RubricJudge:
         return {c: self.judge(c, feats, transcript, band_hint) for c in Criterion}
 
 
-class AnthropicClient:
-    """LLMClient backed by Claude. Lazy import; needs ANTHROPIC_API_KEY."""
+class OpenAICompatibleClient:
+    """LLMClient over any OpenAI-compatible /chat/completions endpoint.
 
-    def __init__(self, model: str = "claude-haiku-4-5-20251001", temperature: float = 0.2):
-        self.model, self.temperature = model, temperature
+    Defaults to the Tavus hosted LLM so one Tavus key serves the judges too; point
+    `base_url` at any provider to bring your own. Uses stdlib urllib (no SDK dep).
+    """
+
+    def __init__(self, base_url: str | None = None, api_key: str | None = None,
+                 model: str | None = None, temperature: float = 0.2):
+        from ..config import config
+        self.base_url = (base_url or config.llm_base_url).rstrip("/")
+        self.api_key = api_key or config.llm_api_key
+        self.model = model or config.llm_model
+        self.temperature = temperature
 
     def complete(self, system: str, user: str) -> str:
-        import anthropic  # lazy
-        client = anthropic.Anthropic()
-        msg = client.messages.create(
-            model=self.model, max_tokens=1024, temperature=self.temperature,
-            system=system, messages=[{"role": "user", "content": user}])
-        return msg.content[0].text
+        import json as _json
+        import urllib.request
+        if not self.base_url:
+            raise RuntimeError("LLM_BASE_URL not set — see .env.example")
+        body = _json.dumps({
+            "model": self.model, "temperature": self.temperature,
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": user}],
+        }).encode()
+        req = urllib.request.Request(
+            f"{self.base_url}/chat/completions", data=body, method="POST",
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {self.api_key}"})
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = _json.loads(resp.read())
+        return data["choices"][0]["message"]["content"]
 
 
-__all__ = ["LLMClient", "RAGStore", "NullRAG", "RubricJudge", "AnthropicClient",
+__all__ = ["LLMClient", "RAGStore", "NullRAG", "RubricJudge", "OpenAICompatibleClient",
            "build_user_prompt", "JUDGE_INSTRUCTIONS"]

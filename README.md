@@ -4,8 +4,9 @@ A voice-ML backend that scores **IELTS Speaking** turns against the official
 criteria and turns the result into an **interactive coaching conversation** with a
 Tavus PAL (the "examiner"). Built for the Tavus Labs hackathon.
 
-> Design & rationale: [`docs/ielts-speaking-coach-design.md`](docs/ielts-speaking-coach-design.md)
-> · Prompts: [`prompts/`](prompts/)
+> **Architecture & decisions: [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md)** ·
+> long-form rationale: [`docs/ielts-speaking-coach-design.md`](docs/ielts-speaking-coach-design.md) ·
+> prompts: [`prompts/`](prompts/) · Tavus setup: [`scripts/setup_tavus.py`](scripts/setup_tavus.py)
 
 ## The idea in one picture
 
@@ -56,9 +57,13 @@ Heavier capabilities are optional extras, gated so they never block the core:
 ```bash
 pip install -e ".[lexical]"   # rare-word frequency bands (wordfreq)
 pip install -e ".[nlp]"       # grammar parsing (spaCy) + python -m spacy download en_core_web_sm
-pip install -e ".[pron]"      # Charsiu GOP pronunciation (torch/transformers)
-pip install -e ".[judges]"    # LLM rubric judges (anthropic)
+pip install -e ".[pron]"      # Charsiu GOP pronunciation + forced alignment (torch/transformers)
+pip install -e ".[env]"       # optional .env auto-loading (python-dotenv)
 ```
+
+The rubric judges (Layer B) call the **Tavus hosted LLM** over an OpenAI-compatible
+endpoint using stdlib `urllib` — no SDK needed. One `TAVUS_API_KEY` covers STT, the
+LLM, and the Knowledge Base (RAG). See [`.env.example`](.env.example).
 
 ## Key engineering decisions
 
