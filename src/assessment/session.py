@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from .schema import Turn, Part, Criterion, TurnFeatures, Scorecard
 from .features import extract_features, PronunciationAssessor, ProxyPronunciationAssessor
 from .coaching import CueGenerator, CoachingCue, NEXT_QUESTION_HINT
+from .parts import get_part
 
 _LABEL = {
     Criterion.FLUENCY_COHERENCE: "fluency",
@@ -70,9 +71,10 @@ class CoachingSession:
         self._accumulate(feats)
 
         cues = self._gen.generate(feats, mode=self.mode)
-        # Never interrupt the Part 2 monologue: hold cues, deliver after.
+        # Respect the part's cue policy: hold cues during a no-interrupt part
+        # (e.g. the Part 2 long turn) and deliver them afterwards.
         deliver_now = cues
-        if turn.part == Part.PART2:
+        if get_part(turn.part).config.hold_cues:
             self.held.extend(cues)
             deliver_now = []
 
