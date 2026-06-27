@@ -28,3 +28,15 @@ git push origin main
 ## Step 4: Cloud auth (optional for testing)
 
 In Lovable **Cloud** → **Authentication**: disable **Confirm email** for faster hackathon testing.
+
+## Step 5: RAI guardrails (responsive, accessibility, i18n)
+
+1. Paste Knowledge snippets from [documentation/lovable-knowledge.md](documentation/lovable-knowledge.md) into Lovable Workspace + Project Knowledge.
+2. Import skills from GitHub per [documentation/lovable-skills-setup.md](documentation/lovable-skills-setup.md).
+3. Run the smoke test prompts in that doc to verify skills load.
+
+Repo files:
+
+- [AGENTS.md](AGENTS.md) — always-on rules (Lovable reads from GitHub sync)
+- [skills/](skills/) — `responsive-layout`, `accessibility-speaklab`, `i18n-foundation`
+- [.cursor/skills/](.cursor/skills/) — Cursor copy of the same skills
