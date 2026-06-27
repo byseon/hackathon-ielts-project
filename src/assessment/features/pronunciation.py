@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from typing import Protocol
 from ..schema import Turn, PronunciationFeatures
+from .gop import gop_from_posteriors, pronunciation_features_from_gop
 
 
 class PronunciationAssessor(Protocol):
@@ -91,21 +92,35 @@ class CharsiuGopAssessor:
     def assess(self, turn: Turn) -> PronunciationFeatures:
         if not turn.audio_path:
             raise ValueError("CharsiuGopAssessor needs turn.audio_path (per-turn wav)")
-        aligner = self._ensure()  # noqa: F841 — used once wired
-        feats = PronunciationFeatures(source="gop")
-        # Pipeline (depends on charsiu version):
-        #   1. G2P the reference (turn.clean_text) -> canonical phones
-        #   2. aligner.align(audio, text) -> phone segments + frame posteriors
-        #   3. for each phone p over its frames: gop_p = mean(logP(p) - logP(argmax))
-        #   4. word_score = mean(gop over its phones); accuracy_score = scaled mean
-        #   5. word stress: aligned vowel duration/energy vs expected pattern
-        #   6. intonation: F0 contour slope/range over the utterance
-        # The installed model produces the numbers; this adapter standardises them
-        # into PronunciationFeatures for the judge.
+        # 1. model inference (the only model-dependent glue)
+        log_post, segments, phone_index = self._align_and_posteriors(turn)
+        # 2. GOP scoring + 3. feature mapping (pure Python; see features/gop.py)
+        per_phone = gop_from_posteriors(log_post, segments, phone_index)
+        prosody, stress, intonation = self._prosody(turn, segments)
+        return pronunciation_features_from_gop(
+            per_phone, word_stress_errors=stress, prosody_score=prosody,
+            intonation_flags=intonation)
+
+    def _align_and_posteriors(self, turn: Turn):
+        """Run charsiu -> (log_posteriors[frame][phone], segments, phone_to_index).
+
+        The only piece that needs torch + the model. Steps: G2P the reference text ->
+        canonical phones; aligner.align(audio, text) -> phone segments + the
+        frame-level log-posteriorgram; build phone_to_index from the model's phone
+        inventory. Returns the three structures features/gop.py consumes.
+        """
+        self._ensure()
         raise NotImplementedError(
-            "Wire charsiu align() + posterior extraction here; returns gop-based "
-            "accuracy/word_stress/intonation. Use ProxyPronunciationAssessor until then."
-        )
+            "Map charsiu align() output to (log_posteriors, segments, phone_to_index). "
+            "GOP scoring + feature mapping are already implemented in features/gop.py.")
+
+    def _prosody(self, turn: Turn, segments):
+        """Optional: F0/energy -> (prosody_score, word_stress_errors, intonation_flags).
+
+        Compute from aligned durations/energy + an F0 contour (parselmouth/CREPE).
+        Returns neutral values until wired.
+        """
+        return None, [], []
 
 
 def default_assessor() -> PronunciationAssessor:

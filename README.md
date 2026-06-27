@@ -46,6 +46,7 @@ uv venv && uv pip install -e ".[dev]"   # core is pure stdlib; this just adds py
 
 uv run pytest -q                         # unit tests
 uv run python examples/demo.py           # CLI demo: features + scorecard for a turn
+uv run python examples/demo_gop.py       # GOP pronunciation scoring on synthetic posteriors
 uv run python examples/server.py         # browser demo — open http://localhost:8000
 ```
 
