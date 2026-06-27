@@ -64,6 +64,8 @@ def cmd_pal(args) -> None:
     if not face:
         sys.exit("need a default face id: --face <id> (or set TAVUS_FACE_ID)")
     full = pal.build_pal_payload(default_face_id=face, stt_engine=config.tavus_stt_engine)
+    # NOTE: custom_greeting is a CONVERSATION field (not a PAL field) — set it via
+    # build_conversation_payload, not here. The PAL patch carries prompt + face.
     patch = [
         {"op": "replace", "path": "/system_prompt", "value": full["system_prompt"]},
         {"op": "replace", "path": "/default_face_id", "value": face},

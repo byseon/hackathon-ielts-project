@@ -26,30 +26,20 @@ from assessment import pal
 from assessment.schema import Part
 from assessment.webhook import ConversationStore, handle_event
 from assessment.quickscore import score_transcript
+from assessment.transcript import candidate_text, transcript_ready
 
 TAVUS = "https://tavusapi.com/v2"
 STORE = ConversationStore()
 
-_USER_ROLES = {"user", "candidate", "participant", "human"}
-
-
-def _candidate_text(conv: dict) -> str:
-    """Pull the candidate's utterances out of a verbose conversation response."""
-    items = conv.get("transcript") or conv.get("events") or []
-    out = []
-    for u in items if isinstance(items, list) else []:
-        role = str(u.get("role") or u.get("speaker") or u.get("sender") or "").lower()
-        text = u.get("content") or u.get("text") or u.get("utterance") or u.get("message") or ""
-        if role in _USER_ROLES and isinstance(text, str) and text.strip():
-            out.append(text.strip())
-    return " ".join(out)
-
 
 def score_conversation(cid: str) -> dict:
     conv = _tavus("GET", f"/conversations/{cid}?verbose=true")
-    text = _candidate_text(conv)
+    text = candidate_text(conv)
     if not text:
-        return {"error": "no candidate speech in the transcript yet (finish the call first)"}
+        if not transcript_ready(conv):
+            return {"error": "transcript not ready yet — wait ~10-20s after ending the "
+                             "call, then click Score me again."}
+        return {"error": "no candidate speech found in the transcript."}
     card, report, notes = score_transcript(text)
     return {"scorecard": card.to_dict(), "report": asdict(report),
             "notes": notes, "transcript_chars": len(text)}
