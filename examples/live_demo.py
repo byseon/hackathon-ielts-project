@@ -25,9 +25,34 @@ from assessment.config import config
 from assessment import pal
 from assessment.schema import Part
 from assessment.webhook import ConversationStore, handle_event
+from assessment.quickscore import score_transcript
 
 TAVUS = "https://tavusapi.com/v2"
 STORE = ConversationStore()
+
+_USER_ROLES = {"user", "candidate", "participant", "human"}
+
+
+def _candidate_text(conv: dict) -> str:
+    """Pull the candidate's utterances out of a verbose conversation response."""
+    items = conv.get("transcript") or conv.get("events") or []
+    out = []
+    for u in items if isinstance(items, list) else []:
+        role = str(u.get("role") or u.get("speaker") or u.get("sender") or "").lower()
+        text = u.get("content") or u.get("text") or u.get("utterance") or u.get("message") or ""
+        if role in _USER_ROLES and isinstance(text, str) and text.strip():
+            out.append(text.strip())
+    return " ".join(out)
+
+
+def score_conversation(cid: str) -> dict:
+    conv = _tavus("GET", f"/conversations/{cid}?verbose=true")
+    text = _candidate_text(conv)
+    if not text:
+        return {"error": "no candidate speech in the transcript yet (finish the call first)"}
+    card, report, notes = score_transcript(text)
+    return {"scorecard": card.to_dict(), "report": asdict(report),
+            "notes": notes, "transcript_chars": len(text)}
 
 
 def _tavus(method: str, path: str, body: dict | None = None) -> dict:
@@ -75,6 +100,13 @@ class Handler(BaseHTTPRequestHandler):
             from urllib.parse import urlparse, parse_qs
             cid = parse_qs(urlparse(self.path).query).get("cid", [""])[0]
             return self._send(200, json.dumps(asdict(STORE.get(cid))))
+        if self.path.startswith("/api/score"):
+            from urllib.parse import urlparse, parse_qs
+            cid = parse_qs(urlparse(self.path).query).get("cid", [""])[0]
+            try:
+                return self._send(200, json.dumps(score_conversation(cid)))
+            except Exception as e:
+                return self._send(400, json.dumps({"error": str(e)}))
         self._send(404, json.dumps({"error": "not found"}))
 
     def do_POST(self):
@@ -127,8 +159,12 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8>
 </div>
 <div id=status></div>
 <div id=frame></div>
-<div class=row><button class=sec onclick=fetchTranscript()>Fetch transcript</button>
-  <small>(after you end the call)</small></div>
+<div class=row>
+  <button onclick=scoreMe()>Score me</button>
+  <button class=sec onclick=fetchTranscript()>Fetch transcript</button>
+  <small>(after you end the call)</small>
+</div>
+<div id=score></div>
 <pre id=transcript></pre>
 <script>
 let CID=null;
@@ -152,6 +188,23 @@ async function fetchTranscript(){
  const r=await fetch('/api/transcript?cid='+encodeURIComponent(CID));
  const d=await r.json();
  document.getElementById('transcript').textContent=JSON.stringify(d,null,2);
+}
+async function scoreMe(){
+ if(!CID){alert('start a test first');return;}
+ const box=document.getElementById('score'); box.textContent='Scoring…';
+ const r=await fetch('/api/score?cid='+encodeURIComponent(CID));
+ const d=await r.json();
+ if(d.error){box.textContent='Error: '+esc(d.error);return;}
+ const sc=d.scorecard, crit=sc.criteria;
+ const pill=(k)=>'<span class=pill style="display:inline-block;background:#eee;border-radius:20px;padding:2px 9px;margin:2px">'
+   +esc(k)+': '+esc(crit[k].band)+'</span>';
+ const h=document.createElement('div');
+ h.innerHTML='<h3>Overall band: '+esc(sc.overall_band)+'</h3>'
+   +Object.keys(crit).map(pill).join('')
+   +'<p><b>Summary:</b> '+esc(d.report.spoken_overview)+'</p>'
+   +'<p><small>Real from transcript: lexical, grammar. Placeholders (need audio): '
+   +'fluency, pronunciation.</small></p>';
+ box.replaceChildren(h);
 }
 </script></body></html>"""
 
